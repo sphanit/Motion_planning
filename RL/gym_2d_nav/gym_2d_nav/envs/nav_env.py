@@ -52,7 +52,7 @@ class NavEnv2D(gym.Env):
     elif(self.theta > np.pi):
       self.theta = self.theta%(-2*np.pi)
 
-    self.pos = self.pos + np.array(r*np.cos(a[1]),r*np.sin(a[1])])
+    self.pos = self.pos + np.array(r*np.cos(a[1]),r*np.sin(a[1]))
     done = bool(np.linalg.norm(self.goal_pos-self.pos)<=0.05 and abs(self.goal_theta - self.theta) <= 0.05)
 
     reward = self.get_reward(a)
