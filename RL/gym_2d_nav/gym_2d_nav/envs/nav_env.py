@@ -9,12 +9,14 @@ pyglet.clock.set_fps_limit(10000)
 class NavEnv2D(gym.Env):
   metadata = {'render.modes': ['human']}
   viewer = None
-  viewer_xy = (400, 400)
+  viewer_xy = (500, 500)
   scale=20
-  arm_info = np.zeros((2, 4))
-  point_info = np.array([200, 100])
-  point_l = 15
-  mouse_in = np.array([False])
+  length = 1
+  bredth = 0.6
+  goal_pos = np.zeros(2)
+  goal_theta = 0
+  pos = np.zeros(2)
+  theta = 0
 
   def __init__(self):
     # Parameters
@@ -29,8 +31,6 @@ class NavEnv2D(gym.Env):
     #Initialisation
     self.init_pos = np.zeros(2)
     self.init_theta = 0
-    self.goal_pos = np.zeros(2)
-    self.goal_theta = 0
 
     # r, theta : Action vector
     actions_low = np.array([-self.max_r, self.min_theta])
@@ -67,7 +67,7 @@ class NavEnv2D(gym.Env):
     reward = self.get_reward(a)
     if done:
       reward += 10
-    #print(a)
+
     return self.get_state(), reward, done, {}
 
   def reset(self):
@@ -77,12 +77,13 @@ class NavEnv2D(gym.Env):
     while True:
       self.goal_pos = self.np_random.uniform(low=0, high=20, size=2)
       dist = np.linalg.norm(self.goal_pos-self.init_pos)
-      if( dist <= 2 and dist >= 0.5):
+      if( dist <= 10 and dist >= 0.5):
         break
     self.pos = self.init_pos.copy()
     self.theta = self.init_theta
     self.v = 0
     self.w = 0
+    print(self.pos)
     return self.get_state()
 
   def get_state(self):
@@ -99,15 +100,16 @@ class NavEnv2D(gym.Env):
     reward = dist_rew + theta_rew + ctrl_rew
     return reward
 
+  def set_fps(self, fps=30):
+        pyglet.clock.set_fps_limit(fps)
+
   def render(self, mode='human', close=False):
     if mode is 'human':
         if self.viewer is None:
-            self.viewer = Viewer(*self.viewer_xy, self.arm_info, self.point_info, self.point_l, self.mouse_in, self.scale)
+            self.viewer = Viewer(*self.viewer_xy, self.length, self.bredth, self.scale, self.pos, self.theta, self.goal_pos, self.goal_theta, self)
         self.viewer.render()
     else:
         super(NavEnv2D, self).render(mode=mode) # just raise an exception
-        #dadadadada
-        #test comment
 
 
 class Viewer(pyglet.window.Window):
@@ -115,26 +117,22 @@ class Viewer(pyglet.window.Window):
         'background': [1]*3 + [1]
     }
     fps_display = pyglet.clock.ClockDisplay()
-    bar_thc = 5
 
-    def __init__(self, width, height, arm_info, point_info, point_l, mouse_in, scale):
+    def __init__(self, width, height, length, bredth, scale, pos, theta, goal_pos, goal_theta, nav2d):
         super(Viewer, self).__init__(width, height, resizable=False, caption='nav', vsync=False)  # vsync=False to not use the monitor FPS
         self.set_location(x=80, y=10)
         pyglet.gl.glClearColor(*self.color['background'])
+        self.nav2d = nav2d
+        self.scale = self.nav2d.scale
+        self.length = self.nav2d.length * self.scale
+        self.bredth = self.nav2d.bredth * self.scale
 
-        self.arm_info = arm_info
-        self.point_info = point_info
-        self.mouse_in = mouse_in
-        self.point_l = point_l
-
-        self.center_coord = np.array((min(width, height)/2, ) * 2)
         self.batch = pyglet.graphics.Batch()
 
-        arm1_box, arm2_box, point_box = [0]*8, [0]*8, [0]*8
-        c1, c2, c3 = (249, 86, 86)*4, (86, 109, 249)*4, (249, 39, 65)*4
-        self.point = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', point_box), ('c3B', c2))
-        self.arm1 = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', arm1_box), ('c3B', c1))
-        self.arm2 = self.batch.add(4, pyglet.gl.GL_QUADS, None, ('v2f', arm2_box), ('c3B', c1))
+        robot_box, goal_box = [0]*10, [0]*10
+        c1, c2, c3 = (249, 86, 86)*5, (86, 109, 249)*5, (249, 39, 65)*5
+        self.robot = self.batch.add(5, pyglet.gl.GL_POLYGON, pyglet.graphics.OrderedGroup(0), ('v2f', robot_box), ('c3B', c2))
+        self.goal  = self.batch.add(5, pyglet.gl.GL_POLYGON, None, ('v2f', goal_box), ('c3B', c1))
 
     def render(self):
         pyglet.clock.tick()
@@ -148,39 +146,30 @@ class Viewer(pyglet.window.Window):
         self.clear()
         self.batch.draw()
         # self.fps_display.draw()
-
     def _update_arm(self):
-        point_l = self.point_l
-        point_box = (self.point_info[0] - point_l, self.point_info[1] - point_l,
-                     self.point_info[0] + point_l, self.point_info[1] - point_l,
-                     self.point_info[0] + point_l, self.point_info[1] + point_l,
-                     self.point_info[0] - point_l, self.point_info[1] + point_l)
-        self.point.vertices = point_box
+        leng = self.length
+        brd = self.bredth
+        print(self.nav2d.pos)
 
-        arm1_coord = (*self.center_coord, *(self.arm_info[0, 2:4]))  # (x0, y0, x1, y1)
-        arm2_coord = (*(self.arm_info[0, 2:4]), *(self.arm_info[1, 2:4]))  # (x1, y1, x2, y2)
-        arm1_thick_rad = np.pi / 2 - self.arm_info[0, 1]
-        x01, y01 = arm1_coord[0] - np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[1] + np.sin(
-            arm1_thick_rad) * self.bar_thc
-        x02, y02 = arm1_coord[0] + np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[1] - np.sin(
-            arm1_thick_rad) * self.bar_thc
-        x11, y11 = arm1_coord[2] + np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[3] - np.sin(
-            arm1_thick_rad) * self.bar_thc
-        x12, y12 = arm1_coord[2] - np.cos(arm1_thick_rad) * self.bar_thc, arm1_coord[3] + np.sin(
-            arm1_thick_rad) * self.bar_thc
-        arm1_box = (x01, y01, x02, y02, x11, y11, x12, y12)
-        arm2_thick_rad = np.pi / 2 - self.arm_info[1, 1]
-        x11_, y11_ = arm2_coord[0] + np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[1] - np.sin(
-            arm2_thick_rad) * self.bar_thc
-        x12_, y12_ = arm2_coord[0] - np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[1] + np.sin(
-            arm2_thick_rad) * self.bar_thc
-        x21, y21 = arm2_coord[2] - np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[3] + np.sin(
-            arm2_thick_rad) * self.bar_thc
-        x22, y22 = arm2_coord[2] + np.cos(arm2_thick_rad) * self.bar_thc, arm2_coord[3] - np.sin(
-            arm2_thick_rad) * self.bar_thc
-        arm2_box = (x11_, y11_, x12_, y12_, x21, y21, x22, y22)
-        self.arm1.vertices = arm1_box
-        self.arm2.vertices = arm2_box
+
+        rx1,ry1 = self.rotate_points(-leng/2, -brd/2,self.nav2d.theta) + self.nav2d.pos*self.scale
+        rx2,ry2 = self.rotate_points(+leng/2, -brd/2,self.nav2d.theta) + self.nav2d.pos*self.scale
+        rx3,ry3 = self.rotate_points(+leng/2 + 6, 0, self.nav2d.theta) + self.nav2d.pos*self.scale
+        rx4,ry4 = self.rotate_points(+leng/2, +brd/2,self.nav2d.theta) + self.nav2d.pos*self.scale
+        rx5,ry5 = self.rotate_points(-leng/2, +brd/2,self.nav2d.theta) + self.nav2d.pos*self.scale
+
+        robot_box = (rx1,ry1, rx2,ry2, rx3,ry3, rx4,ry4, rx5,ry5)
+        self.robot.vertices = robot_box
+
+
+        gx1,gy1 = self.rotate_points( -leng/2,  -brd/2, self.nav2d.goal_theta) + self.nav2d.goal_pos*self.scale
+        gx2,gy2 = self.rotate_points( +leng/2, -brd/2,self.nav2d.goal_theta)+ self.nav2d.goal_pos*self.scale
+        gx3,gy3 = self.rotate_points( +leng/2 + 6, 0,self.nav2d.goal_theta)+ self.nav2d.goal_pos*self.scale
+        gx4,gy4 = self.rotate_points( +leng/2,  +brd/2,self.nav2d.goal_theta)+ self.nav2d.goal_pos*self.scale
+        gx5,gy5 = self.rotate_points( -leng/2,  +brd/2,self.nav2d.goal_theta)+ self.nav2d.goal_pos*self.scale
+
+        goal_box = (gx1,gy1, gx2,gy2, gx3,gy3, gx4,gy4, gx5,gy5)
+        self.goal.vertices = goal_box
 
     def on_key_press(self, symbol, modifiers):
         if symbol == pyglet.window.key.UP:
@@ -200,11 +189,16 @@ class Viewer(pyglet.window.Window):
         elif symbol == pyglet.window.key.A:
             pyglet.clock.set_fps_limit(30)
 
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.point_info[:] = [x, y]
+    # def on_mouse_motion(self, x, y, dx, dy):
+    #     self.point_info[:] = [x, y]
+    #
+    # def on_mouse_enter(self, x, y):
+    #     self.mouse_in[0] = True
+    #
+    # def on_mouse_leave(self, x, y):
+    #     self.mouse_in[0] = False
 
-    def on_mouse_enter(self, x, y):
-        self.mouse_in[0] = True
-
-    def on_mouse_leave(self, x, y):
-        self.mouse_in[0] = False
+    def rotate_points(self,x,y,theta):
+        x_new = x*np.cos(theta)-y*np.sin(theta)
+        y_new = x*np.sin(theta)+y*np.cos(theta)
+        return x_new, y_new
